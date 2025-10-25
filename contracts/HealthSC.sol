@@ -22,6 +22,8 @@ contract HealthSC {
     event PseudonymSet(address indexed patient, string pseudonym);
     event PseudonymReset(address indexed regulator, address indexed oldPatient, address indexed newPatient, string newPseudonym);
     event DebugHospitalAdded(address indexed hospital);
+    event PIIHashUpdated(address indexed hospital, string oldIpfsHash, string newIpfsHash);
+    event AuthorizedHospitalsSynced(address indexed patient, uint256 hospitalCount);
 
     constructor(
         address registryAddress,
@@ -185,10 +187,10 @@ contract HealthSC {
     }
 
     // Patient can set or update the encrypted symmetric key for a hospital
-    function setHospitalKey(address hospital, bytes memory encryptedSymKey) external {
+    function setHospitalKey(address hospitalAddr, bytes memory encryptedSymKey) external {
         require(msg.sender == patient, "Only patient can set hospital key");
-        require(registry.isHospitalRegistered(hospital), "Hospital not registered");
-        authorizedHospitalKeys[hospital] = encryptedSymKey;
+        require(registry.isHospitalRegistered(hospitalAddr), "Hospital not registered");
+        authorizedHospitalKeys[hospitalAddr] = encryptedSymKey;
     }
 
     // Hospital can retrieve the IPFS hash and its encrypted symmetric key if authorized
@@ -196,5 +198,30 @@ contract HealthSC {
         require(registry.isHospitalRegistered(msg.sender), "Only a registered hospital can call this");
         require(authorizedHospitalKeys[msg.sender].length != 0, "Hospital not authorized");
         return (ipfsHash, authorizedHospitalKeys[msg.sender]);
+    }
+
+    // Hospital can update the IPFS hash of patient PII (must be registered and authorized)
+    function updatePIIHash(string memory newIpfsHash) external {
+        require(registry.isHospitalRegistered(msg.sender), "Only a registered hospital can call this");
+        require(authorizedHospitalKeys[msg.sender].length != 0, "Hospital not authorized");
+        require(bytes(newIpfsHash).length > 0, "IPFS hash cannot be empty");
+        
+        string memory oldHash = ipfsHash;
+        ipfsHash = newIpfsHash;
+        emit PIIHashUpdated(msg.sender, oldHash, newIpfsHash);
+    }
+
+    // Patient can sync all authorized hospitals with new encrypted symmetric keys
+    function syncAuthorizedHospitals(address[] memory hospitals, bytes[] memory encryptedKeys) external {
+        require(msg.sender == patient, "Only patient can sync hospital keys");
+        require(hospitals.length == encryptedKeys.length, "Arrays length mismatch");
+        
+        for (uint i = 0; i < hospitals.length; i++) {
+            require(registry.isHospitalRegistered(hospitals[i]), "Hospital not registered");
+            require(authorizedHospitalKeys[hospitals[i]].length != 0, "Hospital not authorized");
+            authorizedHospitalKeys[hospitals[i]] = encryptedKeys[i];
+        }
+        
+        emit AuthorizedHospitalsSynced(msg.sender, hospitals.length);
     }
 } 
